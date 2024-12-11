@@ -15,6 +15,10 @@ from deepgram import (
     Microphone,
 )
 import signal
+from groq import Groq
+import numpy as np
+import base64
+from scipy.io import wavfile
 
 # 환경 변수 로드
 env_path = r"C:\Users\bmc\Desktop\홍태광\workspace\.env"
@@ -55,6 +59,9 @@ class AudioProcessor:
         self.dg_connection = None
         self.is_connected = False
         self.loop = asyncio.new_event_loop()
+        self.groq_client = Groq(api_key=app.config['GROQ_API_KEY'])
+        self.audio_buffer = []
+        self.last_process_time = datetime.now()
         
     def on_message(self, self_, result, **kwargs):
         try:
@@ -123,18 +130,91 @@ class AudioProcessor:
 
     async def process_audio(self, audio_data):
         """오디오 데이터 처리"""
-        if not self.is_connected:
-            success = await self.init_deepgram()
-            if not success:
-                return
-        
         try:
+            # Deepgram Nova-2 처리
+            if not self.is_connected:
+                success = await self.init_deepgram()
+                if not success:
+                    return
+            
             print(f"Processing audio data of size: {len(audio_data)} bytes")
+            
+            # Deepgram에 오디오 데이터 전송
             self.dg_connection.send(audio_data)
             print("Audio data sent to Deepgram successfully")
+            
+            # Groq Whisper 처리를 위한 버퍼링
+            self.audio_buffer.append(audio_data)
+            buffer_size_bytes = sum(len(chunk) for chunk in self.audio_buffer)
+            
+            # 버퍼가 일정 크기(약 2초)에 도달하면 처리
+            if buffer_size_bytes >= 64000:  # 16000Hz * 2초 * 2바이트
+                print("Processing buffered audio with Groq Whisper...")
+                # 버퍼의 모든 오디오 데이터 결합
+                combined_audio = np.concatenate([
+                    np.frombuffer(chunk, dtype=np.int16) 
+                    for chunk in self.audio_buffer
+                ])
+                
+                # Groq 처리
+                await self.process_audio_groq(combined_audio.tobytes())
+                
+                # 버퍼 초기화
+                self.audio_buffer = []
+                print("Groq processing completed and buffer cleared")
+                
         except Exception as e:
-            print(f"Error sending audio: {e}")
+            print(f"Error in process_audio: {e}")
             self.is_connected = False
+            raise e
+
+    async def process_audio_groq(self, audio_data):
+        """Groq Whisper를 사용한 오디오 처리"""
+        try:
+            # PCM 데이터를 int16 배열로 변환
+            audio_array = np.frombuffer(audio_data, dtype=np.int16)
+            
+            # WAV 파일로 저장 (16kHz 샘플레이트)
+            audio_file_path = "temp_audio.wav"
+            print(f"Saving audio data to {audio_file_path}...")
+            wavfile.write(audio_file_path, 16000, audio_array)
+            
+            # Groq API 호출 (음성 인식 요청)
+            print("Sending audio to Groq API...")
+            with open(audio_file_path, "rb") as file:
+                response = self.groq_client.audio.transcriptions.create(
+                    file=(audio_file_path, file.read()),
+                    model="whisper-large-v3",
+                    prompt="한국어 음성을 인식합니다.",
+                    response_format="json",
+                    temperature=0.0,
+                    language="ko"
+                )
+                
+                transcript = response.text
+                print(f"[Groq Whisper] Recognized: {transcript}")
+            
+            # 임시 파일 삭제
+            os.remove(audio_file_path)
+            print("Temporary audio file removed")
+            
+            if transcript:
+                # 클라이언트에 전송
+                socketio.emit('transcription_update', {
+                    'model': 'groq-whisper',
+                    'text': transcript,
+                    'metrics': {
+                        'latency': round((datetime.now() - self.last_process_time).total_seconds() * 1000, 2),
+                        'confidence': 0
+                    }
+                })
+                
+            self.last_process_time = datetime.now()
+            
+        except Exception as e:
+            print(f"Groq Whisper processing error: {e}")
+            if os.path.exists(audio_file_path):
+                os.remove(audio_file_path)
 
 # STT/Translation 모델 구성
 STT_MODELS = {

@@ -316,10 +316,20 @@
         socket.on('transcription_update', (data) => {
             const { model, text, metrics } = data;
             
-            // nova2 모델의 결과를 해당 div에 업데이트
-            if (model === 'nova2') {
-                const element = document.querySelector('#novaStt .transcript-text');
-                const metricsElement = document.querySelector('#novaStt .metrics');
+            let elementId;
+            switch(model) {
+                case 'nova2':
+                    elementId = 'novaStt';
+                    break;
+                case 'groq-whisper':  // Groq Whisper 결과 처리
+                    elementId = 'groqWhisperStt';
+                    break;
+                // 다른 모델들...
+            }
+            
+            if (elementId) {
+                const element = document.querySelector(`#${elementId} .transcript-text`);
+                const metricsElement = document.querySelector(`#${elementId} .metrics`);
                 
                 if (element) {
                     element.innerHTML += `${text}<br>`;
