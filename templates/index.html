@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="ko" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STT & Translation Model Comparison</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        /* 기존 스타일 유지 */
+        .model-card {
+            height: 300px;
+            overflow-y: auto;
+        }
+        .transcript-text {
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+        .metrics {
+            font-size: 0.8rem;
+            border-top: 1px solid #e5e7eb;
+            margin-top: 0.5rem;
+            padding-top: 0.5rem;
+        }
+        .recording {
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { background-color: rgba(239, 68, 68, 0.2); }
+            50% { background-color: rgba(239, 68, 68, 0.5); }
+            100% { background-color: rgba(239, 68, 68, 0.2); }
+        }
+        .dark {
+            background-color: #1a1a1a;
+            color: #ffffff;
+        }
+        
+        .dark .bg-white {
+            background-color: #2d2d2d;
+        }
+        
+        .dark .text-gray-800 {
+            color: #ffffff;
+        }
+        
+        .dark .text-gray-600 {
+            color: #d1d1d1;
+        }
+        
+        .dark .border-gray-300 {
+            border-color: #404040;
+        }
+        
+        .dark .metrics {
+            border-top-color: #404040;
+        }
+        
+        .theme-toggle {
+            padding: 0.5rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .dark .theme-toggle {
+            background-color: #2d2d2d;
+            color: #ffffff;
+        }
+        
+        /* 다크모드 스타일 수정 */
+        :root.dark {
+            background-color: #1a1a1a;
+            color: #ffffff;
+        }
+        
+        :root.dark body {
+            background-color: #1a1a1a;
+        }
+        
+        :root.dark .bg-white {
+            background-color: #2d2d2d !important;
+        }
+        
+        :root.dark .text-gray-800 {
+            color: #ffffff !important;
+        }
+        
+        :root.dark .text-gray-600 {
+            color: #d1d1d1 !important;
+        }
+        
+        :root.dark .border-gray-300 {
+            border-color: #404040 !important;
+        }
+        
+        :root.dark select {
+            background-color: #2d2d2d;
+            color: #ffffff;
+            border-color: #404040;
+        }
+        
+        :root.dark .metrics {
+            border-top-color: #404040;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 transition-colors duration-200">
+    <div class="container mx-auto px-4 py-8">
+        <header class="mb-8">
+            <div class="flex justify-between items-center mb-6">
+                <h1 class="text-3xl font-bold text-gray-800">실시간 STT & 번역 모델 비교</h1>
+                <div class="flex items-center space-x-4">
+                    <button id="themeToggle" class="theme-toggle">
+                        <svg id="sunIcon" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                                d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z">
+                            </path>
+                        </svg>
+                        <svg id="moonIcon" class="w-6 h-6 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                                d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z">
+                            </path>
+                        </svg>
+                    </button>
+                    <select id="translationModel" class="bg-white border border-gray-300 rounded-lg px-4 py-2">
+                        <option value="llama_8b">Llama 3.1-8b</option>
+                        <option value="gemma_7b">Gemma 7b</option>
+                        <option value="exaone">Exaone-7.8b</option>
+                    </select>
+                    <button id="startButton" class="bg-green-500 hover:bg-green-600 text-white px-6 py-2 rounded-lg font-semibold transition-colors">
+                        시작
+                    </button>
+                    <button id="stopButton" class="bg-red-500 hover:bg-red-600 text-white px-6 py-2 rounded-lg font-semibold transition-colors" disabled>
+                        중지
+                    </button>
+                </div>
+            </div>
+            <div id="recordingStatus" class="hidden p-2 text-center text-red-600 font-semibold recording">
+                녹음 중...
+            </div>
+        </header>
+
+        <!-- STT Results - First Row -->
+        <div class="grid grid-cols-4 gap-4 mb-4">
+            <!-- Google STT -->
+            <div class="bg-white rounded-lg shadow-lg">
+                <div class="bg-blue-500 text-white p-3 rounded-t-lg">
+                    <h2 class="text-lg font-semibold">Google STT</h2>
+                </div>
+                <div id="googleStt" class="model-card p-4">
+                    <div class="transcript-text"></div>
+                    <div class="metrics"></div>
+                </div>
+            </div>
+
+            <!-- OpenAI Whisper -->
+            <div class="bg-white rounded-lg shadow-lg">
+                <div class="bg-purple-500 text-white p-3 rounded-t-lg">
+                    <h2 class="text-lg font-semibold">OpenAI Whisper</h2>
+                </div>
+                <div id="whisperStt" class="model-card p-4">
+                    <div class="transcript-text"></div>
+                    <div class="metrics"></div>
+                </div>
+            </div>
+
+            <!-- Deepgram Nova-2 -->
+            <div class="bg-white rounded-lg shadow-lg">
+                <div class="bg-green-500 text-white p-3 rounded-t-lg">
+                    <h2 class="text-lg font-semibold">Deepgram Nova-2</h2>
+                </div>
+                <div id="novaStt" class="model-card p-4">
+                    <div class="transcript-text"></div>
+                    <div class="metrics"></div>
+                </div>
+            </div>
+
+            <!-- Groq Whisper Large v3 -->
+            <div class="bg-white rounded-lg shadow-lg">
+                <div class="bg-pink-500 text-white p-3 rounded-t-lg">
+                    <h2 class="text-lg font-semibold">Groq Whisper-Large-V3</h2>
+                </div>
+                <div id="groqWhisperStt" class="model-card p-4">
+                    <div class="transcript-text"></div>
+                    <div class="metrics"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Translation Results - Second Row -->
+        <div class="grid grid-cols-4 gap-4">
+            <!-- Translation Model 1 -->
+            <div class="bg-white rounded-lg shadow-lg">
+                <div id="translationModelHeader1" class="bg-indigo-500 text-white p-3 rounded-t-lg">
+                    <h2 id="translationModelTitle1" class="text-lg font-semibold">번역 결과 1</h2>
+                </div>
+                <div id="selectedModelTranslation1" class="model-card p-4">
+                    <div class="transcript-text"></div>
+                    <div class="metrics"></div>
+                </div>
+            </div>
+
+            <!-- Translation Model 2 -->
+            <div class="bg-white rounded-lg shadow-lg">
+                <div id="translationModelHeader2" class="bg-indigo-500 text-white p-3 rounded-t-lg">
+                    <h2 id="translationModelTitle2" class="text-lg font-semibold">번역 결과 2</h2>
+                </div>
+                <div id="selectedModelTranslation2" class="model-card p-4">
+                    <div class="transcript-text"></div>
+                    <div class="metrics"></div>
+                </div>
+            </div>
+
+            <!-- Translation Model 3 -->
+            <div class="bg-white rounded-lg shadow-lg">
+                <div id="translationModelHeader3" class="bg-indigo-500 text-white p-3 rounded-t-lg">
+                    <h2 id="translationModelTitle3" class="text-lg font-semibold">번역 결과 3</h2>
+                </div>
+                <div id="selectedModelTranslation3" class="model-card p-4">
+                    <div class="transcript-text"></div>
+                    <div class="metrics"></div>
+                </div>
+            </div>
+
+            <!-- Translation Model 4 -->
+            <div class="bg-white rounded-lg shadow-lg">
+                <div id="translationModelHeader4" class="bg-indigo-500 text-white p-3 rounded-t-lg">
+                    <h2 id="translationModelTitle4" class="text-lg font-semibold">번역 결과 4</h2>
+                </div>
+                <div id="selectedModelTranslation4" class="model-card p-4">
+                    <div class="transcript-text"></div>
+                    <div class="metrics"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        let audioContext;
+        let micStream;
+        let scriptProcessor;
+
+        const startButton = document.getElementById('startButton');
+        const stopButton = document.getElementById('stopButton');
+        const recordingStatus = document.getElementById('recordingStatus');
+
+        function updateTranscript(modelId, text, metrics = null) {
+            const element = document.querySelector(`#${modelId} .transcript-text`);
+            const metricsElement = document.querySelector(`#${modelId} .metrics`);
+            
+            element.innerHTML += text + '<br>';
+            element.scrollTop = element.scrollHeight;
+
+            if (metrics) {
+                metricsElement.innerHTML = `
+                    <div class="text-sm text-gray-600">
+                        <div>처리시간: ${metrics.latency}ms</div>
+                        <div>정확도: ${metrics.confidence}%</div>
+                        ${metrics.wer ? `<div>WER: ${metrics.wer}%</div>` : ''}
+                    </div>
+                `;
+            }
+        }
+
+        async function startRecording() {
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                micStream = audioContext.createMediaStreamSource(stream);
+                scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+
+                scriptProcessor.onaudioprocess = function(event) {
+                    const audioData = event.inputBuffer.getChannelData(0);
+                    // 16-bit PCM 변환
+                    const pcmData = new Int16Array(audioData.length);
+                    for (let i = 0; i < audioData.length; i++) {
+                        pcmData[i] = Math.max(-1, Math.min(1, audioData[i])) * 32767;
+                    }
+                    socket.emit('audio_data', pcmData.buffer);
+                };
+
+                micStream.connect(scriptProcessor);
+                scriptProcessor.connect(audioContext.destination);
+
+                startButton.disabled = true;
+                stopButton.disabled = false;
+                recordingStatus.classList.remove('hidden');
+
+                // Deepgram 연결 시작
+                socket.emit('toggle_transcription', { action: 'start' });
+
+            } catch (err) {
+                console.error('마이크 접근 오류:', err);
+                alert('마이크 접근 권한이 필요합니다.');
+            }
+        }
+
+        function stopRecording() {
+            if (scriptProcessor) {
+                scriptProcessor.disconnect();
+                scriptProcessor.onaudioprocess = null;
+            }
+            if (micStream) {
+                micStream.disconnect();
+            }
+            if (audioContext) {
+                audioContext.close();
+            }
+            startButton.disabled = false;
+            stopButton.disabled = true;
+            recordingStatus.classList.add('hidden');
+            console.log('녹음 중지됨');
+        }
+
+        socket.on('transcription_update', (data) => {
+            const { model, text, metrics } = data;
+            
+            // nova2 모델의 결과를 해당 div에 업데이트
+            if (model === 'nova2') {
+                const element = document.querySelector('#novaStt .transcript-text');
+                const metricsElement = document.querySelector('#novaStt .metrics');
+                
+                if (element) {
+                    element.innerHTML += `${text}<br>`;
+                    element.scrollTop = element.scrollHeight;
+                }
+                
+                if (metricsElement && metrics) {
+                    metricsElement.innerHTML = `
+                        <div class="text-sm text-gray-600">
+                            ${metrics.latency ? `<div>처리시간: ${metrics.latency}ms</div>` : ''}
+                            ${metrics.confidence ? `<div>정확도: ${metrics.confidence}%</div>` : ''}
+                        </div>
+                    `;
+                }
+            }
+        });
+
+        startButton.addEventListener('click', startRecording);
+        stopButton.addEventListener('click', stopRecording);
+
+        // 모델 선택 관련 코드 추가
+        const translationModelSelect = document.getElementById('translationModel');
+        
+        // 모든 번역 모델 타이틀과 헤더 요소 가져오기
+        const translationTitles = Array.from({length: 4}, (_, i) => 
+            document.getElementById(`translationModelTitle${i+1}`));
+        const translationHeaders = Array.from({length: 4}, (_, i) => 
+            document.getElementById(`translationModelHeader${i+1}`));
+
+        const modelColors = {
+            'llama_8b': 'bg-indigo-500',
+            'gemma_7b': 'bg-teal-500',
+            'exaone': 'bg-purple-500'
+        };
+
+        const modelNames = {
+            'llama_8b': 'Llama 3.1-8b',
+            'gemma_7b': 'Gemma 7b',
+            'exaone': 'Exaone-7.8b'
+        };
+
+        // 초기 모델 이름 설정
+        const initialModel = translationModelSelect.value;
+        translationTitles.forEach(title => {
+            title.textContent = modelNames[initialModel];
+        });
+        
+        translationHeaders.forEach(header => {
+            header.className = `${modelColors[initialModel]} text-white p-3 rounded-t-lg`;
+        });
+
+        // 초기 상태 설정
+        updateModelHeaders(translationModelSelect.value);
+
+        // 모델 변경 이벤트
+        translationModelSelect.addEventListener('change', function() {
+            updateModelHeaders(this.value);
+            socket.emit('change_translation_model', { model: this.value });
+        });
+
+        // 다크모드 토글 기능
+        const themeToggle = document.getElementById('themeToggle');
+        const sunIcon = document.getElementById('sunIcon');
+        const moonIcon = document.getElementById('moonIcon');
+        const root = document.documentElement;  // html 요소 참조
+
+        // 저장된 테마 불러오기
+        const savedTheme = localStorage.getItem('theme');
+        if (savedTheme === 'dark') {
+            root.classList.add('dark');
+            sunIcon.classList.add('hidden');
+            moonIcon.classList.remove('hidden');
+        } else {
+            root.classList.remove('dark');
+            sunIcon.classList.remove('hidden');
+            moonIcon.classList.add('hidden');
+        }
+
+        themeToggle.addEventListener('click', () => {
+            root.classList.toggle('dark');
+            sunIcon.classList.toggle('hidden');
+            moonIcon.classList.toggle('hidden');
+            
+            // 테마 저장
+            const isDark = root.classList.contains('dark');
+            localStorage.setItem('theme', isDark ? 'dark' : 'light');
+            
+            // 콘솔에 현재 상태 출력 (디버깅용)
+            console.log('Dark mode:', isDark);
+        });
+
+        // 시스템 다크모드 감지
+        const darkModeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+        
+        function handleDarkMode(e) {
+            if (e.matches) {
+                root.classList.add('dark');
+                sunIcon.classList.add('hidden');
+                moonIcon.classList.remove('hidden');
+            } else {
+                root.classList.remove('dark');
+                sunIcon.classList.remove('hidden');
+                moonIcon.classList.add('hidden');
+            }
+        }
+
+        darkModeMediaQuery.addListener(handleDarkMode);
+        handleDarkMode(darkModeMediaQuery);
+    </script>
+</body>
+</html>

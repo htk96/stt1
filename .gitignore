@@ -1,0 +1,55 @@
+# 환경 변수 파일
+.env
+
+# Python 기본 제외 파일
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 가상 환경 디렉토리
+venv/
+.env/
+.venv/
+
+# IDE 및 편집기 관련 파일
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 로그 파일
+*.log
+
+# OS 생성 파일
+.DS_Store
+Thumbs.db
+
+# 테스트 결과
+coverage/
+*.cover
+*.coverage
+*.pytest_cache/
+
+# 빌드 디렉토리
+build/
+dist/
+*.egg-info/
+*.eggs/
+
+# Docker 관련 파일
+*.pid
+*.tar
+
+# Jupyter Notebook 체크포인트
+.ipynb_checkpoints/
+
+# 특정 데이터 파일
+*.sqlite3
+*.db
+*.csv
+*.tsv
+*.json
+
+# 기타
+*.bak
+*.tmp
